@@ -1,0 +1,13 @@
+{
+  "name": "tally-dashboard",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "cd backend && python main.py",
+    "frontend": "cd frontend && npm run dev",
+    "install:all": "cd frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
