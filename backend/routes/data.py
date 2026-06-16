@@ -153,12 +153,36 @@ def get_data():
         bk["is_overdraft"] = bk["closing_balance"] < 0
         cash_accounts = bk[["ledger_name", "parent_group", "closing_balance", "is_overdraft"]].to_dict(orient="records")
 
-    # ── Products ──────────────────────────────────────────────────────────────
+    # ── Products — item-level from voucher_inventory.csv ─────────────────────
+    stock_df     = _read("stock_summary.csv")
     top_products = []
+    sales_items, purch_items, stock_items = [], [], []
+    total_stock_value = 0.0
+
+    def _qty_num(raw):
+        """Extract numeric part from '100 Nos' or '50.000 kgs'."""
+        if raw is None:
+            return None
+        try:
+            return float(str(raw).strip().replace(",", "").split()[0])
+        except (ValueError, IndexError):
+            return None
+
+    def _qty_unit(raw):
+        """Extract unit part from '100 Nos' → 'Nos'."""
+        if raw is None:
+            return None
+        parts = str(raw).strip().split()
+        return parts[1] if len(parts) > 1 else None
+
     if not inv_df.empty:
         inv_df["amt_abs"] = inv_df["amount"].apply(
             lambda x: abs(float(x)) if x is not None and str(x) not in ("", "nan") else 0
         )
+        inv_df["qty_num"] = inv_df["quantity"].apply(_qty_num)
+        inv_df["unit"]    = inv_df["quantity"].apply(_qty_unit)
+
+        # Legacy top_products (backward compat)
         top_products = (
             inv_df.groupby(["stock_item", "voucher_type"])
             .agg(total_amount=("amt_abs", "sum"), lines=("quantity", "count"))
@@ -168,12 +192,51 @@ def get_data():
             .to_dict(orient="records")
         )
 
+        # Sales breakdown per item
+        sale_inv = inv_df[inv_df["voucher_type"].str.contains("Sales", case=False, na=False)]
+        if not sale_inv.empty:
+            sg = sale_inv.groupby("stock_item").agg(
+                qty_sold=("qty_num", "sum"),
+                revenue=("amt_abs", "sum"),
+                txns=("voucher_number", "nunique"),
+                unit=("unit", "first"),
+            ).reset_index().sort_values("revenue", ascending=False)
+            sg["avg_sell_rate"] = (sg["revenue"] / sg["qty_sold"].replace(0, float("nan"))).round(2)
+            sales_items = sg.where(pd.notnull(sg), None).to_dict(orient="records")
+
+        # Purchase breakdown per item
+        pur_inv = inv_df[inv_df["voucher_type"].str.contains("Purchase", case=False, na=False)]
+        if not pur_inv.empty:
+            pg = pur_inv.groupby("stock_item").agg(
+                qty_purchased=("qty_num", "sum"),
+                cost=("amt_abs", "sum"),
+                txns=("voucher_number", "nunique"),
+                unit=("unit", "first"),
+            ).reset_index().sort_values("cost", ascending=False)
+            pg["avg_buy_rate"] = (pg["cost"] / pg["qty_purchased"].replace(0, float("nan"))).round(2)
+            purch_items = pg.where(pd.notnull(pg), None).to_dict(orient="records")
+
+    # Stock summary from stock_summary.csv (may not exist until tally_final.py is re-run)
+    if not stock_df.empty:
+        stock_df["closing_qty"]   = pd.to_numeric(stock_df.get("closing_qty",   pd.Series()), errors="coerce")
+        stock_df["closing_rate"]  = pd.to_numeric(stock_df.get("closing_rate",  pd.Series()), errors="coerce")
+        stock_df["closing_value"] = pd.to_numeric(stock_df.get("closing_value", pd.Series()), errors="coerce")
+        total_stock_value = float(stock_df["closing_value"].sum(skipna=True))
+        stock_items = (
+            stock_df[["stock_item", "stock_group", "unit", "opening_qty",
+                       "closing_qty", "closing_rate", "closing_value"]]
+            .sort_values("closing_value", ascending=False)
+            .where(pd.notnull(stock_df), None)
+            .to_dict(orient="records")
+        )
+
     sources = {
-        "sales":       _source("sales_register.csv",        sales_df, "sales_register.csv"),
-        "purchases":   _source("purchase_register.csv",     purch_df, "purchase_register.csv"),
-        "outstanding": _source("outstanding_comparative.csv", out_df,  "outstanding_comparative.csv"),
-        "ledgers":     _source("ledgers.csv",               led_df,   "ledgers.csv"),
-        "inventory":   _source("voucher_inventory.csv",     inv_df,   "voucher_inventory.csv"),
+        "sales":         _source("sales_register.csv",        sales_df, "sales_register.csv"),
+        "purchases":     _source("purchase_register.csv",     purch_df, "purchase_register.csv"),
+        "outstanding":   _source("outstanding_comparative.csv", out_df,  "outstanding_comparative.csv"),
+        "ledgers":       _source("ledgers.csv",               led_df,   "ledgers.csv"),
+        "inventory":     _source("voucher_inventory.csv",     inv_df,   "voucher_inventory.csv"),
+        "stock_summary": _source("stock_summary.csv",         stock_df, "stock_summary.csv"),
     }
 
     return {
@@ -192,7 +255,13 @@ def get_data():
             "net_payable":  round(gst_out_total - gst_in_total, 2),
         },
         "cash_bank": {"accounts": cash_accounts, "total": round(cash_bank, 2)},
-        "products":  {"top_items": top_products},
+        "products":  {
+            "top_items":         top_products,
+            "sales_items":       sales_items,
+            "purchase_items":    purch_items,
+            "stock_items":       stock_items,
+            "total_stock_value": round(total_stock_value, 2),
+        },
     }
 
 

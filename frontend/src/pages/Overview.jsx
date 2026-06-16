@@ -24,16 +24,16 @@ function OutstandingTable({ rows }) {
 
   const s = {
     table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
-    th: { textAlign: "left", padding: "6px 10px", color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid var(--border)" },
-    td: { padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" },
-    tag: (bucket) => {
+    th:    { textAlign: "left", padding: "6px 10px", color: "var(--text-muted)", fontSize: 11, textTransform: "uppercase", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" },
+    td:    { padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--text-secondary)" },
+    tdRed: { padding: "8px 10px", borderBottom: "1px solid var(--border)", color: "var(--accent-red)", fontWeight: 600 },
+    ageTag: (bucket) => {
       const c = { "90+": "#a855f7", "61-90": "#ef4444", "31-60": "#f59e0b", "0-30": "#22c55e" };
       const col = c[bucket] ?? "#64748b";
-      return {
-        display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 10,
-        background: col + "20", color: col, border: `1px solid ${col}50`,
-      };
+      return { display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 10, background: col + "20", color: col, border: `1px solid ${col}50` };
     },
+    overdueTag: { display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 10, background: "#ef444420", color: "#ef4444", border: "1px solid #ef444450" },
+    okTag:      { display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 10, background: "#22c55e20", color: "#22c55e", border: "1px solid #22c55e50" },
   };
 
   const fmt = (v) => {
@@ -48,20 +48,31 @@ function OutstandingTable({ rows }) {
           <th style={s.th}>Party</th>
           <th style={s.th}>Bill Ref</th>
           <th style={s.th}>Bill Date</th>
+          <th style={s.th}>Due Date</th>
           <th style={{ ...s.th, textAlign: "right" }}>Amount</th>
-          <th style={{ ...s.th, textAlign: "center" }}>Ageing</th>
+          <th style={{ ...s.th, textAlign: "center" }}>Bill Age</th>
+          <th style={{ ...s.th, textAlign: "center" }}>Overdue</th>
           <th style={s.th}>Type</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((r, i) => (
-          <tr key={i}>
-            <td style={s.td}>{r.party}</td>
+          <tr key={i} style={r.is_overdue ? { background: "#ef444405" } : {}}>
+            <td style={r.is_overdue ? s.tdRed : s.td}>{r.party}</td>
             <td style={s.td}>{r.bill_ref ?? "—"}</td>
             <td style={s.td}>{r.bill_date ?? "—"}</td>
+            <td style={s.td}>{r.due_date ?? "—"}</td>
             <td style={{ ...s.td, textAlign: "right" }}>{fmt(r.pending_amount)}</td>
             <td style={{ ...s.td, textAlign: "center" }}>
-              <span style={s.tag(r.ageing_bucket)}>{r.ageing_bucket}</span>
+              <span style={s.ageTag(r.ageing_bucket)}>{r.ageing_bucket} days</span>
+            </td>
+            <td style={{ ...s.td, textAlign: "center" }}>
+              {r.days_overdue != null
+                ? r.is_overdue
+                  ? <span style={s.overdueTag}>{r.days_overdue}d overdue</span>
+                  : <span style={s.okTag}>Due in {Math.abs(r.days_overdue)}d</span>
+                : <span style={{ color: "var(--text-muted)" }}>—</span>
+              }
             </td>
             <td style={s.td}>{r.outstanding_type}</td>
           </tr>
@@ -237,9 +248,15 @@ export default function Overview() {
   }
 
   function renderProducts(data, sources) {
+    const tv = data?.products?.total_stock_value;
     return (
       <div style={card("#16a34a")}>
-        <SectionHeader title="Products" source={sources?.inventory} accent="#16a34a" />
+        <SectionHeader
+          title="Products"
+          sub={tv ? `Stock on hand: ₹${(tv/1e5).toFixed(1)}L` : undefined}
+          source={sources?.inventory}
+          accent="#16a34a"
+        />
         <ProductTable />
       </div>
     );
